@@ -2,6 +2,7 @@ const Project = require("../models/project");
 const SoftwareCharacteristics = require("../models/softwareChrxs");
 const DataCenter = require("../models/dataCenter");
 // const ProjectDataCenter = require("../models/projectDataCenter");
+const { getTransferCF } = require("../dataTransferCF");
 const fs = require("fs");
 const csv = require("csv-parser");
 const { spawn } = require("child_process");
@@ -53,6 +54,7 @@ function parseSoftwareCharacteristicsFromFile(filePath) {
 exports.createProject = async (req, res) => {
   try {
     // Check if a file was uploaded
+
     if (!req.file) {
       return res.status(400).json({ error: "No file uploaded" });
     }
@@ -100,6 +102,22 @@ exports.createProject = async (req, res) => {
     // software characteristics
     await softwareCharacteristicsDoc.save();
 
+    // Create an array to store promises for data transfer calculations
+    const dataTransferPromises = project.dataCenters.map((projectDataCenter) =>
+      getTransferCF("142.250.191.238", 1)
+        .then((result) => {
+          projectDataCenter.DataTransferCarbonFootprint = result;
+        })
+        .catch((error) => {
+          console.error(error);
+          // Handle errors if any
+        })
+    );
+
+    // Wait for all data transfer calculations to complete
+    await Promise.all(dataTransferPromises);
+    console.log("project", project);
+
     // Create an array to store inputs for each data center
     const inputDataArray = [];
 
@@ -112,7 +130,7 @@ exports.createProject = async (req, res) => {
       // Create the input data for the current data center
       const inputData = {
         num_threads: currentDataCenter.numberOfThreads,
-        workload: 0,
+        workload: softwareCharacteristicsDoc.category,
         processor_type: currentDataCenter.processorType,
         c_voltage: currentDataCenter.voltage,
         frequency: currentDataCenter.frequency.base,
@@ -143,8 +161,8 @@ exports.createProject = async (req, res) => {
       pythonProcess.stdout.once("data", (data) => {
         const outputs = JSON.parse(data.toString().trim());
         // Iterate over the outputs and update the corresponding data centers
-        i = 0;
-        for (const projectDataCenter of project.dataCenters) {
+        let i = 0;
+        const promises = project.dataCenters.map((projectDataCenter) => {
           const output = outputs[i][0];
           const powerConsumption = output[0];
           const runtime = output[1];
@@ -154,7 +172,7 @@ exports.createProject = async (req, res) => {
           projectDataCenter.runtime = runtime;
 
           // Calculate the operational carbon footprint
-          const carbonIntensity = 0.0005; // kg CO2e / kWh
+          const carbonIntensity = 0.06; // kg CO2e / kWh
           const PUE = 1.5;
           const operationalCarbonFootprint =
             powerConsumption * runtime * carbonIntensity * PUE;
@@ -162,27 +180,25 @@ exports.createProject = async (req, res) => {
           // Update the corresponding data center with the operational carbon footprint
           projectDataCenter.OperationalCarbonFootprint =
             operationalCarbonFootprint;
+          // Calculate the battery storage carbon footprint
 
           // Calculate the cost
 
           // Calculate the embodied carbon footprint
 
-          // Calculate the data transfer carbon footprint
-
-          // Calculate the battery storage carbon footprint
-
           i++;
-        }
+        });
 
-        project.markModified("dataCenters");
-        project
-          .save()
+        Promise.all(promises)
           .then(() => {
-            resolve();
+            project.markModified("dataCenters");
+            project.save().then(() => {
+              resolve();
+            });
           })
           .catch((error) => {
             console.error(error);
-            reject();
+            reject(error);
           });
       });
     });
@@ -236,7 +252,10 @@ exports.getAllProjects = async (req, res) => {
 exports.getProjectByUserId = async (req, res) => {
   try {
     const userId = req.params.id;
-    const projects = await Project.find({ user: userId });
+    const projects = await Project.find({ user: userId }).sort({
+      createdAt: -1,
+    });
+
     res.status(200).json({ projects });
   } catch (error) {
     res.status(500).json({ error: "Failed to retrieve projects" });

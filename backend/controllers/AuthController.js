@@ -3,6 +3,7 @@ const User = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { registerValidation, loginValidation } = require("../validation");
+const { getTransferCF } = require("../dataTransferCF");
 require("dotenv").config();
 
 //register user
@@ -35,7 +36,6 @@ register = async (req, res) => {
 
 //login user
 login = async (req, res) => {
-  //Validation
   const { error } = loginValidation(req.body);
   if (error) return res.status(400).send(error.details[0].message);
 
@@ -51,7 +51,7 @@ login = async (req, res) => {
     { username: user.username, id: user._id },
     process.env.TOKEN,
     {
-      expiresIn: "2h",
+      expiresIn: "1h",
     }
   );
   res.header("auth-token", token).send(token);

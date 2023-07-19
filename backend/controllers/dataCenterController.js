@@ -31,7 +31,7 @@ getDataCenterById = async (req, res) => {
 
 const getAllDataCenters = async (req, res) => {
   try {
-    const dataCenters = await DataCenter.find({});
+    const dataCenters = await DataCenter.find({}).sort({ createdAt: -1 });
     res.status(200).json(dataCenters);
   } catch (error) {
     console.error("Error fetching data centers:", error);
